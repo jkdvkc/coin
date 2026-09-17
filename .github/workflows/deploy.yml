@@ -1,0 +1,54 @@
+# Automatické nasadenie CoinScanner na GitHub Pages.
+# Spustí sa pri každom puši do main (alebo ručne na karte Actions).
+name: Deploy na GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Inštalácia závislostí
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build PWA (ikony + OCR vendor + service worker)
+        run: npm run build:pwa
+
+      - uses: actions/configure-pages@v5
+
+      - name: Nahranie buildu
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
