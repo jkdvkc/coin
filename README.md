@@ -3,6 +3,15 @@
 Slovenská PWA aplikácia na **rozpoznávanie a katalogizáciu mincí**.
 Funguje offline, všetky dáta zostávajú v zariadení (IndexedDB), bez servera a bez platených API.
 
+## 🌐 Verejná adresa (GitHub Pages)
+
+Aplikácia je automaticky nasadzovaná cez GitHub Actions na stálu adresu:
+
+**https://jkdvkc.github.io/coin/**
+
+Každý push do `main` automaticky spustí build a nasadenie (workflow `.github/workflows/deploy.yml`).
+Na iPhone: otvor adresu v Safari → **Zdieľať** → **Na plochu** → spúšťaj z ikony.
+
 ## Ako to funguje (maximálne jednoducho)
 
 1. Klepni na veľké tlačidlo **📷 Odfotiť** dole.
