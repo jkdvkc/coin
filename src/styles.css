@@ -703,9 +703,78 @@ button {
   position: absolute;
   width: min(70vw, 70vh);
   aspect-ratio: 1;
-  border: 2px dashed rgba(217, 180, 90, 0.8);
+  border: 3px dashed rgba(217, 180, 90, 0.8);
   border-radius: 50%;
   pointer-events: none;
+  transition: border-color 0.25s ease, box-shadow 0.25s ease, transform 0.2s ease;
+}
+
+/* minca v kruhu, ale rozmazaná */
+.coin-guide-red {
+  border: 3px solid rgba(255, 82, 82, 0.95);
+  box-shadow: 0 0 0 3px rgba(255, 82, 82, 0.25), 0 0 28px rgba(255, 82, 82, 0.35);
+}
+
+/* minca v kruhu a ostrá – možno fotiť */
+.coin-guide-green {
+  border: 3px solid #3ddc84;
+  box-shadow: 0 0 0 3px rgba(61, 220, 132, 0.25), 0 0 30px rgba(61, 220, 132, 0.45);
+  transform: scale(1.02);
+}
+
+/* status hláška pod kruhom */
+.camera-status {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 14px;
+  margin: 0 auto;
+  width: fit-content;
+  max-width: 88%;
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: rgba(10, 12, 16, 0.78);
+  color: #f2e6c8;
+  font-size: 14px;
+  text-align: center;
+  backdrop-filter: blur(4px);
+}
+
+.camera-status-warn {
+  background: rgba(120, 53, 15, 0.9);
+  color: #ffe1a8;
+}
+
+.btn-torch {
+  min-width: 48px;
+  height: 44px;
+  border-radius: 12px;
+  border: 1px solid rgba(217, 180, 90, 0.4);
+  background: rgba(255, 255, 255, 0.06);
+  font-size: 18px;
+  cursor: pointer;
+}
+
+.btn-torch-on {
+  background: rgba(217, 180, 90, 0.28);
+  border-color: rgba(217, 180, 90, 0.9);
+}
+
+/* nepodarilo sa rozpoznať */
+.recognize-failed {
+  margin-top: 12px;
+  padding: 14px;
+  border: 1px solid rgba(255, 120, 60, 0.45);
+  background: rgba(255, 120, 60, 0.08);
+  border-radius: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.recognize-failed .btn-primary {
+  align-self: flex-start;
+  margin-top: 4px;
 }
 
 .camera-controls {

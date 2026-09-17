@@ -15,10 +15,12 @@ Na iPhone: otvor adresu v Safari → **Zdieľať** → **Na plochu** → spúš�
 ## Ako to funguje (maximálne jednoducho)
 
 1. Klepni na veľké tlačidlo **📷 Odfotiť** dole.
-2. Polož mincu do kruhu – aplikácia **odfotí sama** (sama zameria a stabilizuje obraz).
+2. Polož mincu do kruhu – **kruh ukazuje, či je minca zaostrená**: 🔴 červený = rozmazaná (zaostri), 🟢 zelený = ostrá. **Odfotí až keď je minca ostrá, stabilná a vycentrovaná** (krátky odpočet 3-2-1).
+3. Tma? Tlačidlom 💡 zapneš **blesk** (ak ho telefón podporuje). Kedykoľvek môžeš fotiť aj ručne alebo vybrať fotku z galérie.
 3. Zobrazí sa výzva **„Otoč mincu“** – otoč, potvrď a druhá strana sa tiež odfotí sama.
 4. Aplikácia **sama prečíta a doplní** rok, krajinu, nominál, menu, materiál aj hmotnosť
-   (lokálne OCR + mini-katalóg) a **vypočíta orientačnú cenu**.
+   (lokálne OCR + mini-katalóg) a **vypočíta orientačnú cenu**. Ak sa jej to nepodarí,
+   sám ti navrhne **„Odfotiť znova“** – nič sa nestratí.
 5. Pozri odhad ceny a **rozbaľ možné tlacové chyby** (max. 3) – pri každej je rozsah ceny.
 6. Klepni na **Uložiť** – minca sa uloží do zbierky (ikona 🗂 dole).
 

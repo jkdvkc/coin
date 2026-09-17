@@ -14,27 +14,41 @@ interface CameraProps {
   onCancel: () => void;
 }
 
-/** Stabilita kruhu mince v hľadáčku – vráti (cx, cy, radius) v px videa alebo null. */
-function detectCoinInFrame(video: HTMLVideoElement): { cx: number; cy: number; r: number } | null {
-  if (video.videoWidth === 0) return null;
-  const s = 160;
+/** Prah ostrosti (variancia Laplaciánu, grayscale 0..1) – pod ním je obraz rozmazaný. */
+const SHARP_THRESHOLD = 0.008;
+/** Koľko po sebe idúcich ostrých snímok (≈60 fps) musí prebehnúť, kým odfotí. */
+const HOLD_FRAMES = 90;
+
+interface FrameMetrics {
+  coin: { cx: number; cy: number; r: number } | null;
+  sharp: boolean;
+  dark: boolean;
+}
+
+/** Analýza snímky: je minca v kruhu, dostatočne veľká a ostrá? */
+function frameMetrics(video: HTMLVideoElement): FrameMetrics {
+  const empty: FrameMetrics = { coin: null, sharp: false, dark: false };
+  if (!video.videoWidth) return empty;
+  const s = 176;
   const c = document.createElement("canvas");
   c.width = s;
   c.height = s;
   const ctx = c.getContext("2d", { willReadFrequently: true });
-  if (!ctx) return null;
+  if (!ctx) return empty;
   ctx.drawImage(video, 0, 0, s, s);
   const { data } = ctx.getImageData(0, 0, s, s);
 
   const gray = new Float32Array(s * s);
+  let mean = 0;
   for (let i = 0; i < s * s; i++) {
     gray[i] = (0.299 * data[i * 4] + 0.587 * data[i * 4 + 1] + 0.114 * data[i * 4 + 2]) / 255;
+    mean += gray[i];
   }
-  let mean = 0;
-  for (let i = 0; i < s * s; i++) mean += gray[i];
   mean /= s * s;
-  if (mean < 0.1 || mean > 0.92) return null; // príliš tmavé/svetlé
+  const dark = mean < 0.16 || mean > 0.95;
+  if (dark) return { coin: null, sharp: false, dark: true };
 
+  // Gradienty (hrany) pre detekciu obrysu mince
   const grad = new Float32Array(s * s);
   for (let y = 1; y < s - 1; y++) {
     for (let x = 1; x < s - 1; x++) {
@@ -58,17 +72,50 @@ function detectCoinInFrame(video: HTMLVideoElement): { cx: number; cy: number; r
       }
     }
   }
-  if (count < 30) return null;
+  if (count < 40) return { coin: null, sharp: false, dark: false };
+
   const w = maxX - minX;
   const h = maxY - minY;
-  if (w < s * 0.3 || h < s * 0.3) return null; // minca príliš malá
+  // Minca musí vyplniť primeranú časť záberu (ani zďaleka, ani príliš nahusto)
+  if (w < s * 0.34 || h < s * 0.34 || w > s * 0.94 || h > s * 0.94) {
+    return { coin: null, sharp: false, dark: false };
+  }
   const aspect = w / h;
-  if (aspect < 0.65 || aspect > 1.55) return null; // nie je kruh
+  if (aspect < 0.7 || aspect > 1.45) return { coin: null, sharp: false, dark: false };
+
+  // Stred mince musí byť blízko stredu kruhu v hľadáčku
+  const ccx = (minX + maxX) / 2;
+  const ccy = (minY + maxY) / 2;
+  const offCenter = Math.hypot(ccx - s / 2, ccy - s / 2);
+  if (offCenter > s * 0.15) return { coin: null, sharp: false, dark: false };
+
+  // Ostrosť: variancia Laplaciánu vo vnútri mince (inset 12 % od okraja)
+  const ix0 = Math.max(1, Math.round(minX + w * 0.12));
+  const ix1 = Math.min(s - 2, Math.round(maxX - w * 0.12));
+  const iy0 = Math.max(1, Math.round(minY + h * 0.12));
+  const iy1 = Math.min(s - 2, Math.round(maxY - h * 0.12));
+  let lSum = 0, l2Sum = 0, n = 0;
+  for (let y = iy0; y <= iy1; y++) {
+    for (let x = ix0; x <= ix1; x++) {
+      const i = y * s + x;
+      const lap = 4 * gray[i] - gray[i - 1] - gray[i + 1] - gray[i - s] - gray[i + s];
+      lSum += lap;
+      l2Sum += lap * lap;
+      n++;
+    }
+  }
+  if (n < 200) return { coin: null, sharp: false, dark: false };
+  const variance = l2Sum / n - (lSum / n) * (lSum / n);
+  const sharp = variance >= SHARP_THRESHOLD;
 
   return {
-    cx: ((minX + maxX) / 2 / s) * video.videoWidth,
-    cy: ((minY + maxY) / 2 / s) * video.videoHeight,
-    r: (Math.max(w, h) / 2 / s) * video.videoWidth
+    coin: {
+      cx: (ccx / s) * video.videoWidth,
+      cy: (ccy / s) * video.videoHeight,
+      r: (Math.max(w, h) / 2 / s) * video.videoWidth
+    },
+    sharp,
+    dark: false
   };
 }
 
@@ -76,7 +123,9 @@ export default function Camera({ mode, onComplete, onSingleCapture, onCancel }: 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const rafRef = useRef<number | null>(null);
-  const stableFrames = useRef(0);
+  const stableRef = useRef(0);
+  const cdRef = useRef(0);
+  const focusOkRef = useRef(false);
   const capturedRef = useRef<{ obverse: string | null; reverse: string | null }>({
     obverse: null,
     reverse: null
@@ -87,6 +136,12 @@ export default function Camera({ mode, onComplete, onSingleCapture, onCancel }: 
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [countdown, setCountdown] = useState(0);
+  const [focusOk, setFocusOk] = useState(false);
+  const [hasCoin, setHasCoin] = useState(false);
+  const [isDark, setIsDark] = useState(false);
+  const [retryMsg, setRetryMsg] = useState<string | null>(null);
+  const [torchOn, setTorchOn] = useState(false);
+  const [torchAvailable, setTorchAvailable] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const onCompleteRef = useRef(onComplete);
   onCompleteRef.current = onComplete;
@@ -103,6 +158,8 @@ export default function Camera({ mode, onComplete, onSingleCapture, onCancel }: 
     }
     if (videoRef.current) videoRef.current.srcObject = null;
     setReady(false);
+    setTorchOn(false);
+    setTorchAvailable(false);
   }, []);
 
   const startStream = useCallback(async () => {
@@ -114,7 +171,11 @@ export default function Camera({ mode, onComplete, onSingleCapture, onCancel }: 
     }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1440 } },
+        video: {
+          facingMode: { ideal: "environment" },
+          width: { ideal: 1920 },
+          height: { ideal: 1440 }
+        },
         audio: false
       });
       streamRef.current = stream;
@@ -123,6 +184,9 @@ export default function Camera({ mode, onComplete, onSingleCapture, onCancel }: 
         video.srcObject = stream;
         await video.play().catch(() => undefined);
         setReady(true);
+        const track = stream.getVideoTracks()[0];
+        const caps = track?.getCapabilities?.() as { torch?: boolean } | undefined;
+        setTorchAvailable(!!caps?.torch);
       }
     } catch (e) {
       const err = e as DOMException;
@@ -139,10 +203,22 @@ export default function Camera({ mode, onComplete, onSingleCapture, onCancel }: 
     return () => stopStream();
   }, [startStream, stopStream]);
 
+  const toggleTorch = useCallback(async () => {
+    const track = streamRef.current?.getVideoTracks()[0];
+    if (!track) return;
+    const next = !torchOn;
+    try {
+      await track.applyConstraints({ advanced: [{ torch: next }] } as unknown as MediaTrackConstraints);
+      setTorchOn(next);
+    } catch {
+      // blesk sa nepodarilo prepnúť – ignoruj
+    }
+  }, [torchOn]);
+
   const grabFrame = useCallback((): string | null => {
     const video = videoRef.current;
     if (!video || video.videoWidth === 0) return null;
-    const maxDim = 1280;
+    const maxDim = 1600;
     const scale = Math.min(1, maxDim / Math.max(video.videoWidth, video.videoHeight));
     const w = Math.round(video.videoWidth * scale);
     const h = Math.round(video.videoHeight * scale);
@@ -152,7 +228,7 @@ export default function Camera({ mode, onComplete, onSingleCapture, onCancel }: 
     const ctx = canvas.getContext("2d");
     if (!ctx) return null;
     ctx.drawImage(video, 0, 0, w, h);
-    return canvas.toDataURL("image/jpeg", 0.85);
+    return canvas.toDataURL("image/jpeg", 0.9);
   }, []);
 
   const finishAuto = useCallback(() => {
@@ -164,61 +240,81 @@ export default function Camera({ mode, onComplete, onSingleCapture, onCancel }: 
     }
   }, [stopStream]);
 
-  // Auto-režim: detekcia mince → stabilizácia → odpočet → fot → otočenie → fot → hotovo
+  const captureCurrent = useCallback(
+    (isReverse: boolean) => {
+      busyRef.current = true;
+      const dataUrl = grabFrame();
+      stableRef.current = 0;
+      cdRef.current = 0;
+      setCountdown(0);
+      // Validácia pred záberom: naozaj je v hľadáčku ostrá minca s čitateľným okrajom?
+      loadImage(dataUrl ?? "")
+        .then((img) => {
+          const { canvas: crop } = cropCoinCircle(img);
+          if (!(crop.width > 80 && crop.height > 80)) throw new Error("no coin");
+          return dataUrl;
+        })
+        .then((shot) => {
+          if (!shot) throw new Error("empty");
+          if (!isReverse) {
+            capturedRef.current.obverse = shot;
+            busyRef.current = false;
+            setPhase("flip");
+          } else {
+            capturedRef.current.reverse = shot;
+            busyRef.current = false;
+            finishAuto();
+          }
+        })
+        .catch(() => {
+          // Záber nevyšiel – daj vedieť a skús to znova
+          busyRef.current = false;
+          setRetryMsg("Mincu som nevidel dosť jasne – ešte raz, drž ju v kruhu.");
+          window.setTimeout(() => setRetryMsg(null), 2600);
+        });
+    },
+    [grabFrame, finishAuto]
+  );
+
+  // Auto-režim: minca v kruhu + OSTRÁ + stabilná → odpočet → fot
   useEffect(() => {
     if (mode !== "auto" || !ready) return;
-    if (phase === "done") return;
+    if (phase === "done" || phase === "flip") return;
 
     const tick = () => {
       rafRef.current = requestAnimationFrame(tick);
       const video = videoRef.current;
       if (!video || busyRef.current) return;
 
-      if (phase === "flip") return; // čakáme na klik "Otočila som"
+      const m = frameMetrics(video);
+      const ok = !!m.coin && m.sharp && !m.dark;
 
-      const detection = detectCoinInFrame(video);
-      if (!detection) {
-        stableFrames.current = 0;
-        if (countdown !== 0) setCountdown(0);
+      if (ok !== focusOkRef.current) {
+        focusOkRef.current = ok;
+        setFocusOk(ok);
+      }
+      if (!!m.coin !== hasCoin) setHasCoin(!!m.coin);
+      if (m.dark !== isDark) setIsDark(m.dark);
+
+      if (!ok) {
+        // Rozmazané / mimo kruhu / tma → zruš priebeh
+        stableRef.current = 0;
+        if (cdRef.current !== 0) {
+          cdRef.current = 0;
+          setCountdown(0);
+        }
         return;
       }
-      stableFrames.current++;
-      // minca musí byť stabilná ~1 s (60 snímok) a dostatočne veľká
-      if (stableFrames.current === 30) {
-        setCountdown(2);
+
+      stableRef.current++;
+      const st = stableRef.current;
+      const cd = st > 60 ? 1 : st > 30 ? 2 : st > 15 ? 3 : 0;
+      if (cd !== cdRef.current) {
+        cdRef.current = cd;
+        setCountdown(cd);
       }
-      if (stableFrames.current > 30 && stableFrames.current % 30 === 0 && countdown > 0) {
-        setCountdown((c) => Math.max(0, c - 1));
-      }
-      if (stableFrames.current >= 90) {
-        busyRef.current = true;
-        const dataUrl = grabFrame();
-        stableFrames.current = 0;
-        setCountdown(0);
-        // validácia: naozaj je na fotke minca (kruh)?
-        loadImage(dataUrl ?? "")
-          .then((img) => {
-            const { canvas: crop } = cropCoinCircle(img);
-            const ok = crop.width > 60 && crop.height > 60;
-            if (!ok) throw new Error("no coin");
-            return dataUrl;
-          })
-          .then((shot) => {
-            if (!shot) throw new Error("empty");
-            if (phase === "scan" || phase === "hold") {
-              capturedRef.current.obverse = shot;
-              setPhase("flip");
-            } else if (phase === "scan2") {
-              capturedRef.current.reverse = shot;
-              busyRef.current = false;
-              finishAuto();
-              return;
-            }
-            busyRef.current = false;
-          })
-          .catch(() => {
-            busyRef.current = false;
-          });
+      if (st >= HOLD_FRAMES) {
+        captureCurrent(phase === "scan2");
       }
     };
     rafRef.current = requestAnimationFrame(tick);
@@ -227,13 +323,12 @@ export default function Camera({ mode, onComplete, onSingleCapture, onCancel }: 
       rafRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, ready, phase, countdown, grabFrame, finishAuto]);
+  }, [mode, ready, phase, captureCurrent, finishAuto, hasCoin, isDark]);
 
   const manualCapture = useCallback(() => {
     const dataUrl = grabFrame();
     if (!dataUrl) return;
     if (mode === "auto") {
-      // manuálna spúšť v auto režime: použije sa pre aktuálnu fázu
       if (phase === "scan" || phase === "hold") {
         capturedRef.current.obverse = dataUrl;
         setPhase("flip");
@@ -269,14 +364,32 @@ export default function Camera({ mode, onComplete, onSingleCapture, onCancel }: 
 
   const phaseText =
     phase === "scan"
-      ? "Polož mincu do kruhu – odfotím sama"
+      ? "Líc – polož mincu do kruhu"
       : phase === "hold"
         ? "Drž pokoj…"
         : phase === "flip"
-          ? "Otoč mincu na druhú stranu a polož do kruhu"
+          ? "Otoč mincu na druhú stranu"
           : phase === "scan2"
-            ? "Druhá strana – polož do kruhu"
+            ? "Rub – polož mincu do kruhu"
             : "Hotovo";
+
+  const statusText = retryMsg
+    ? retryMsg
+    : !ready
+      ? "Spúšťam kameru…"
+      : error
+        ? ""
+        : phase === "flip"
+          ? ""
+          : isDark
+            ? "💡 Tma – zapni blesk alebo doplň svetlo"
+            : !hasCoin
+              ? "Polož mincu do zlatého kruhu"
+              : !focusOk
+                ? "⚙️ Zaostri – drž telefón pokojne nad mincou"
+                : countdown > 0
+                  ? `✓ Ostré – odfotím za ${countdown}…`
+                  : "✓ Ostré – drž pokoj…";
 
   return (
     <div className="camera-screen">
@@ -305,9 +418,17 @@ export default function Camera({ mode, onComplete, onSingleCapture, onCancel }: 
             </button>
           </div>
         ) : (
-          <div className={`coin-guide ${countdown > 0 ? "coin-guide-lock" : ""}`} aria-hidden="true" />
+          <div
+            className={`coin-guide ${
+              hasCoin && focusOk ? "coin-guide-green" : hasCoin ? "coin-guide-red" : ""
+            } ${countdown > 0 ? "coin-guide-lock" : ""}`}
+            aria-hidden="true"
+          />
         )}
         {countdown > 0 && <div className="countdown">{countdown}</div>}
+        {ready && !error && phase !== "flip" && (
+          <div className={`camera-status ${retryMsg ? "camera-status-warn" : ""}`}>{statusText}</div>
+        )}
       </div>
 
       <div className="camera-controls">
@@ -327,7 +448,16 @@ export default function Camera({ mode, onComplete, onSingleCapture, onCancel }: 
         >
           <span className="shutter-dot" />
         </button>
-        {mode === "auto" && capturedRef.current.obverse ? (
+        {torchAvailable ? (
+          <button
+            type="button"
+            className={`btn-torch ${torchOn ? "btn-torch-on" : ""}`}
+            onClick={() => void toggleTorch()}
+            aria-label="Blesk"
+          >
+            {torchOn ? "💡" : "🔅"}
+          </button>
+        ) : mode === "auto" && capturedRef.current.obverse ? (
           <img src={capturedRef.current.obverse} alt="líc" className="mini-preview" />
         ) : (
           <span style={{ minWidth: 48 }} />

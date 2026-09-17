@@ -10,12 +10,18 @@ interface CoinResultProps {
   suggestedErrorIds: string[];
   /** čo bolo rozpoznané automaticky – pre čitateľné „čo sa doplnilo“ */
   autoFilled: string[];
+  /** priebeh/verdik auto-rozpoznania (pre „nepodarilo sa rozpoznať“ stav) */
+  auto?: { rawText: string; confidence: number } | null;
   onSave: () => void;
   onEdit: () => void;
   onDiscard: () => void;
+  onRetake: () => void;
 }
 
-export default function CoinResult({ coin, settings, suggestedErrorIds, autoFilled, onSave, onEdit, onDiscard }: CoinResultProps) {
+export default function CoinResult({ coin, settings, suggestedErrorIds, autoFilled, auto, onSave, onEdit, onDiscard, onRetake }: CoinResultProps) {
+  // Rozpoznanie zlyhalo, keď auto-vyplnenie nenašlo žiaden rok/krajinu/nominál
+  const recognized = autoFilled.length > 0;
+  const failed = !recognized;
   const [saved, setSaved] = useState(false);
 
   return (
@@ -62,8 +68,26 @@ export default function CoinResult({ coin, settings, suggestedErrorIds, autoFill
           <h2>{coin.name || `${coin.denomination || "Mince"} ${coin.year}`.trim()}</h2>
           <span className="detail-date">{formatDate(coin.createdAt)}</span>
         </div>
-        {autoFilled.length > 0 && (
+        {recognized && (
           <p className="auto-note muted">Automaticky rozpoznané: {autoFilled.join(", ")}</p>
+        )}
+        {failed && (
+          <div className="recognize-failed">
+            <strong>Nepodarilo sa mi prečítať údaje z fotky 🙈</strong>
+            <p>
+              Fotka bola pravdepodobne rozmazaná alebo minca zle osvetlená. Najlepšie funguje
+              denné svetlo, fotenie z rovna a minca vyplnená do zlatého kruhu.
+            </p>
+            <p className="muted">
+              {auto?.rawText
+                ? `OCR prečítalo: „${auto.rawText.slice(0, 60)}“`
+                : "OCR nenašlo žiadny čitateľný nápis."}
+            </p>
+            <button type="button" className="btn-primary" onClick={onRetake}>
+              📷 Odfotiť znova
+            </button>
+            <p className="muted">…alebo údaje doplň ručne nižšie cez „Upraviť údaje“.</p>
+          </div>
         )}
         <div className="detail-row">
           <span className="detail-label">Krajina</span>

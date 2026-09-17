@@ -286,6 +286,25 @@ export function preprocessForOcr(crop: HTMLCanvasElement): HTMLCanvasElement {
   return out;
 }
 
+/** Invertuje grayscale jas (tmavé mince so svetlým nápisom → Tesseract potrebuje opak). */
+export function invertCanvas(src: HTMLCanvasElement): HTMLCanvasElement {
+  const out = document.createElement("canvas");
+  out.width = src.width;
+  out.height = src.height;
+  const ctx = out.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return src;
+  ctx.drawImage(src, 0, 0);
+  const img = ctx.getImageData(0, 0, out.width, out.height);
+  const d = img.data;
+  for (let i = 0; i < d.length; i += 4) {
+    d[i] = 255 - d[i];
+    d[i + 1] = 255 - d[i + 1];
+    d[i + 2] = 255 - d[i + 2];
+  }
+  ctx.putImageData(img, 0, 0);
+  return out;
+}
+
 const METAL_LABELS: Record<MetalClass, string> = {
   copper: "Meď / pozinkovaná oceľ s medeným povrchom",
   gold: "Mosadz / Nordic gold / niklová mosadz",
@@ -302,7 +321,11 @@ const METAL_MATERIAL: Record<MetalClass, string> = {
   unknown: ""
 };
 
-/** Hlavná funkcia: z data URL fotky urobí auto-vyplnenie formulára. */
+/**
+ * Hlavná funkcia: z data URL fotky urobí auto-vyplnenie formulára.
+ * Robí DVA pokusy OCR: klasický predspracovaný obraz a invertovaný (tmavé mince
+ * so svetlým nápisom). Berie pokus, ktorý dal zmysluplnnejší text (viac slov + číslic).
+ */
 export async function recognizeCoinPhoto(
   dataUrl: string,
   onProgress?: (p: OcrProgress) => void
@@ -316,25 +339,46 @@ export async function recognizeCoinPhoto(
 
   onProgress?.({ stage: "preprocess", progress: 0.3 });
   const pre = preprocessForOcr(crop);
+  const preInv = invertCanvas(pre);
 
   onProgress?.({ stage: "load-model", progress: 0.4 });
   const worker = await getWorker();
 
   onProgress?.({ stage: "recognize", progress: 0.55 });
-  // Simulovaný priebeh (reálny progress z Workera nie je dostupný bez loggera)
   let ticker: ReturnType<typeof setInterval> | null = null;
   try {
     ticker = setInterval(() => {
       onProgress?.({ stage: "recognize", progress: Math.min(0.95, (Date.now() % 100000) / 100000 * 0.4 + 0.55) });
     }, 500);
-    const { data } = await worker.recognize(pre);
-    const rawText = data.text ?? "";
+
+    const scoreText = (t: string) => {
+      const words = (t.match(/[A-Za-zÀ-ž]{3,}/g) ?? []).length;
+      const digits = (t.match(/\d{2,}/g) ?? []).length;
+      return words * 2 + digits;
+    };
+
+    const run = await worker.recognize(pre);
+    let rawText = run.data.text ?? "";
+    let score = scoreText(rawText);
+
+    // Druhý pokus – invertovaný obraz (tmavá minca, svetlý nápis)
+    if (score < 3) {
+      const runInv = await worker.recognize(preInv);
+      const invText = runInv.data.text ?? "";
+      const invScore = scoreText(invText);
+      if (invScore > score) {
+        rawText = invText;
+        score = invScore;
+      }
+    }
+
     onProgress?.({ stage: "done", progress: 1 });
     const parsed = parseCoinText(rawText);
     const hints: string[] = [];
     if (!parsed.year) hints.push("Rok sa z fotky nepodarilo prečítať – skús lepšie osvetlenie alebo fot z rovna.");
     if (!parsed.country) hints.push("Krajinu sa nepodarilo spoznať z nápisu.");
     if (!parsed.denomination) hints.push("Nominál sa nepodarilo prečítať – doplň ručne.");
+    if (parsed.confidence < 0.45) hints.push("Fotka bola príliš rozmazaná/tmavá – pre lepší odhad odfoti znova z rovna pri dobrom svetle.");
     return {
       parsed,
       metal: metalFinal,

@@ -257,10 +257,12 @@ export default function App() {
               : []
           }
           autoFilled={view.autoFilled}
+          auto={view.auto ? { rawText: view.auto.rawText, confidence: view.auto.confidence } : null}
           onSave={() => {
             void dbSaveCoin(view.coin).then(reload).then(() => setView({ name: "detail", id: view.coin.id }));
           }}
           onEdit={() => setView({ name: "editor", id: null })}
+          onRetake={() => setQuickCamera(true)}
           onDiscard={() => setView({ name: "collection" })}
         />
       )}
