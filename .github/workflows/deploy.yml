@@ -36,7 +36,10 @@ jobs:
       - name: Build PWA (ikony + OCR vendor + service worker)
         run: npm run build:pwa
 
-      - uses: actions/configure-pages@v5
+      - name: Aktivácia GitHub Pages (ak ešte nie je)
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
 
       - name: Nahranie buildu
         uses: actions/upload-pages-artifact@v3
