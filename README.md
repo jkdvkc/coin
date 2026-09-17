@@ -3,13 +3,13 @@
 Slovenská PWA aplikácia na **rozpoznávanie a katalogizáciu mincí**.
 Funguje offline, všetky dáta zostávajú v zariadení (IndexedDB), bez servera a bez platených API.
 
-## 🌐 Verejná adresa (GitHub Pages)
+## 🌐 Verejná adresa (Vercel)
 
-Aplikácia je automaticky nasadzovaná cez GitHub Actions na stálu adresu:
+Aplikácia sa automaticky nasadzuje na **Vercel** (bezplatný hosting, HTTPS) pri každom pushi do `main`:
 
-**https://jkdvkc.github.io/coin/**
+**https://coin-scanner-**····**.vercel.app** *(presná adresa sa ukáže po prvom deployi)*
 
-Každý push do `main` automaticky spustí build a nasadenie (workflow `.github/workflows/deploy.yml`).
+Repozitár: https://github.com/jkdvkc/coin (GitHub Actions len kontroluje build).
 Na iPhone: otvor adresu v Safari → **Zdieľať** → **Na plochu** → spúšťaj z ikony.
 
 ## Ako to funguje (maximálne jednoducho)

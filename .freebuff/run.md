@@ -44,7 +44,16 @@ npm run preview -- --port 4780 --strictPort
 - Server beží detached; log: `.freebuff/preview-<id>.log`.
 - `allowedHosts: true` v `vite.config.ts` – bez toho Vite blokuje požiadavky cez tunnel host.
 
-**Verejná HTTPS URL pre iPhone (cloudflared tunnel):**
+**Verejná stála adresa (Vercel):**
+
+- URL: https://coin-scanner-<slug>.vercel.app (presná adresa je v logu prvého deploya; projekt `coin-scanner`)
+- Repo: https://github.com/jkdvkc/coin (branch `main`)
+- Deploy: automaticky cez Vercel pri každom pushi do main (vercel.json: buildCommand = npm run build:pwa).
+- GitHub Actions (.github/workflows/deploy.yml) už NENADESCALOVALA Pages – len build kontrola (z dôvodu kolízie s existujúcou doménou jakoda.ch).
+- Lokálny push: `git push` (origin/main, credential helper Windows – prihlásený účet jkdvkc).
+- Build používa relatívne cesty (`base: "./"` v vite.config.ts) → funguje v koreni aj v podadresári.
+
+**Verejná HTTPS URL pre iPhone (cloudflared tunnel – dočasná alternatíva):**
 
 ```bash
 # cloudflared je nainštalovaný cez winget (Cloudflare.cloudflared)
