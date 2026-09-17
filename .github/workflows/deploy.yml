@@ -11,6 +11,7 @@ permissions:
   contents: read
   pages: write
   id-token: write
+  administration: write # kvôli enablement (aktivácia Pages z workflowu)
 
 concurrency:
   group: pages
