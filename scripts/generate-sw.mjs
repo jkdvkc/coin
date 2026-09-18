@@ -23,7 +23,7 @@ const assets = existsSync("dist") && outArg === "dist"
   : ["./", "./index.html", "./manifest.webmanifest", "./pwa-192.png", "./pwa-512.png"];
 
 const sw = `// CoinScanner service worker (generované: ${new Date().toISOString()})
-const CACHE = "coinscanner-v3-rel";
+const CACHE = "coinscanner-v5-instant";
 const ASSETS = ${JSON.stringify(assets, null, 2)};
 
 self.addEventListener("install", (event) => {

@@ -701,6 +701,9 @@ button {
 
 .coin-guide {
   position: absolute;
+  top: 50%;
+  left: 50%;
+  translate: -50% -50%;
   width: min(70vw, 70vh);
   aspect-ratio: 1;
   border: 3px dashed rgba(217, 180, 90, 0.8);
@@ -1090,23 +1093,6 @@ button {
   margin: 0;
   font-size: 16px;
   font-weight: 600;
-}
-
-.coin-guide-lock {
-  border-color: var(--ok);
-  border-style: solid;
-}
-
-.countdown {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  font-size: 72px;
-  font-weight: 800;
-  color: var(--ok);
-  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.7);
-  pointer-events: none;
 }
 
 .mini-preview {

@@ -15,7 +15,11 @@ import {
 } from "./lib/storage";
 import { exportBackup, importBackup } from "./lib/backup";
 import { analyzeFromDataUrl } from "./lib/recognize";
-import { recognizeCoinPhoto, type CoinAutoFill } from "./lib/ocr";
+import {
+  recognizeCoinPhoto,
+  extractMetalFromPhoto,
+  type CoinAutoFill
+} from "./lib/ocr";
 import { DEFAULT_SETTINGS, type Settings } from "./lib/estimate";
 import { detectErrorHints } from "./lib/errors";
 import { suggestSpec } from "./lib/catalog";
@@ -85,11 +89,11 @@ export default function App() {
         auto = null;
       }
 
-      // Materiál z rubu (farba kovu), ak líc nebol jednoznačný
+      // Materiál z rubu – len rýchla farba kovu (bez pomalého OCR)
       try {
-        const rev = await recognizeCoinPhoto(result.reverse, () => undefined);
-        if (auto && auto.materialSuggestion === "" && rev.materialSuggestion) {
-          auto.materialSuggestion = rev.materialSuggestion;
+        const revMetal = await extractMetalFromPhoto(result.reverse);
+        if (auto && auto.materialSuggestion === "" && revMetal?.materialSuggestion) {
+          auto.materialSuggestion = revMetal.materialSuggestion;
         }
       } catch {
         // rub nie je kritický
@@ -374,7 +378,7 @@ export default function App() {
           <section className="card">
             <h3 className="section-title">O aplikácii</h3>
             <p className="muted">
-              CoinScanner • verzia 0.2.0 • funguje offline, bez servera a bez platených API.
+              CoinScanner • verzia 0.3.0 • funguje offline, bez servera a bez platených API.
               Po odfotení lica automaticky prečíta nápis (lokálne OCR) a predvyplní rok,
               krajinu, nominál a menu; z farby kovu odhadne materiál. Analýza fotografie
               tiež vyhodnocuje osvetlenie, vycentrovanie a naznačuje možnú chyborazbu.

@@ -55,6 +55,7 @@ function loadTesseractLib(): Promise<unknown> {
 
 interface TesseractWorker {
   recognize: (image: HTMLCanvasElement) => Promise<{ data: { text: string } }>;
+  setParameters: (params: Record<string, string>) => Promise<unknown> | unknown;
   terminate: () => Promise<unknown>;
 }
 
@@ -286,6 +287,24 @@ export function preprocessForOcr(crop: HTMLCanvasElement): HTMLCanvasElement {
   return out;
 }
 
+/**
+ * Iba farba kovu z fotky (bez OCR) – rýchle (~100 ms). Používa sa pre rub,
+ * keď líc nevládol určiť materiál, aby sa rub zbytočne ne-OCR-oval.
+ */
+export async function extractMetalFromPhoto(
+  dataUrl: string
+): Promise<{ metal: MetalClass; materialSuggestion: string } | null> {
+  try {
+    const img = await loadImage(dataUrl);
+    const { canvas: crop, metal } = cropCoinCircle(img);
+    const bimetal = detectBimetal(crop);
+    const m: MetalClass = bimetal ? "bimetal" : metal;
+    return { metal: m, materialSuggestion: METAL_MATERIAL[m] };
+  } catch {
+    return null;
+  }
+}
+
 /** Invertuje grayscale jas (tmavé mince so svetlým nápisom → Tesseract potrebuje opak). */
 export function invertCanvas(src: HTMLCanvasElement): HTMLCanvasElement {
   const out = document.createElement("canvas");
@@ -356,19 +375,30 @@ export async function recognizeCoinPhoto(
       const digits = (t.match(/\d{2,}/g) ?? []).length;
       return words * 2 + digits;
     };
+    void scoreText;
 
-    const run = await worker.recognize(pre);
-    let rawText = run.data.text ?? "";
-    let score = scoreText(rawText);
-
-    // Druhý pokus – invertovaný obraz (tmavá minca, svetlý nápis)
-    if (score < 3) {
-      const runInv = await worker.recognize(preInv);
-      const invText = runInv.data.text ?? "";
-      const invScore = scoreText(invText);
-      if (invScore > score) {
-        rawText = invText;
-        score = invScore;
+    // Mince = riedky text na kruhu: default PSM 3 (celostránkový) na nich zlyháva.
+    // Skúšame sparse text (11) na normalnom aj invertovanom obraze, potom blok (6).
+    const attempts: Array<{ canvas: HTMLCanvasElement; psm: string }> = [
+      { canvas: pre, psm: "11" },
+      { canvas: preInv, psm: "11" },
+      { canvas: pre, psm: "6" }
+    ];
+    let rawText = "";
+    let score = -1;
+    for (const a of attempts) {
+      try {
+        await worker.setParameters({ tessedit_pageseg_mode: a.psm });
+        const run = await worker.recognize(a.canvas);
+        const text = run.data.text ?? "";
+        const s = scoreText(text);
+        if (s > score) {
+          rawText = text;
+          score = s;
+        }
+        if (score >= 4) break; // dosť dobrý výsledok – ďalšie pokusy netreba
+      } catch {
+        // pokus zlyhal – skúsime ďalší
       }
     }
 
