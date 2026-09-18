@@ -14,10 +14,9 @@ npm run icons
 # c) OCR modely do public/tesseract/ (raz, ~13 MB; vyžaduje internet)
 npm run vendor:ocr
 
-# d) Service worker – pre dev stačí predvolený, produkčný sa generuje po builde
-npm run sw          # verejný dev SW (public/sw.js)
-# alebo kompletný produkčný build vrátane SW so zoznamom dist assetov:
-#   npm run build:pwa   (= icons + vite build + sw do dist/)
+# d) Service worker – produkčný sa generuje automaticky v rámci build:pwa
+#    npm run sw          # len SW do public/ (väčšinou netreba)
+#    npm run build:pwa   # ikony + vendor + vite build + SW do dist/
 ```
 
 `.env` súbory projekt nepoužíva – nič kopírovať z main checkoutu nie je potrebné.
@@ -44,12 +43,13 @@ npm run preview -- --port 4780 --strictPort
 - Server beží detached; log: `.freebuff/preview-<id>.log`.
 - `allowedHosts: true` v `vite.config.ts` – bez toho Vite blokuje požiadavky cez tunnel host.
 
-**Verejná stála adresa (Vercel):**
+**Verejná stála adresa (Netlify):**
 
-- URL: https://coin-scanner-<slug>.vercel.app (presná adresa je v logu prvého deploya; projekt `coin-scanner`)
+- URL: **https://coin-scanner-app-512.netlify.app** (zadarmo, verejná, SSO vypnuté)
 - Repo: https://github.com/jkdvkc/coin (branch `main`)
-- Deploy: automaticky cez Vercel pri každom pushi do main (vercel.json: buildCommand = npm run build:pwa).
-- GitHub Actions (.github/workflows/deploy.yml) už NENADESCALOVALA Pages – len build kontrola (z dôvodu kolízie s existujúcou doménou jakoda.ch).
+- Deploy: ručne `npx netlify-cli deploy --prod --dir=dist` (účet slobodazvierat444) alebo automaticky po prepojení v Netlify UI (Deploys → Link repository → jkdvkc/coin). GitHub Actions robí len build kontrolu (Pages vypnuté kvôli kolízii s doménou jakoda.ch).
+- **Pozor:** Netlify CLI pri `deploy --dir` rešpektuje `.gitignore` – tam musí zostať len `/public/sw.js`, NIE všeobecné `sw.js` (inak sa SW nenahrá a PWA offline nefunguje).
+- `npm run build` = `npm run build:pwa` (Netlify/Vercel buildy musia obsahovať ikony, OCR vendor aj SW).
 - Lokálny push: `git push` (origin/main, credential helper Windows – prihlásený účet jkdvkc).
 - Build používa relatívne cesty (`base: "./"` v vite.config.ts) → funguje v koreni aj v podadresári.
 
