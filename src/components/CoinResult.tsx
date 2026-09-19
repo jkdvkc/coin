@@ -1,6 +1,7 @@
 import { useState } from "react";
 import CoinValuation from "./CoinValuation";
 import { formatDate } from "../lib/format";
+import { findSpec } from "../lib/catalog";
 import type { CoinRecord } from "../lib/storage";
 import type { Settings } from "../lib/estimate";
 
@@ -114,6 +115,48 @@ export default function CoinResult({ coin, settings, suggestedErrorIds, autoFill
           </div>
         )}
       </div>
+
+      {(() => {
+        const spec = findSpec(coin.country, coin.denomination, coin.year);
+        if (!spec) return null;
+        const years = spec.spec.years;
+        return (
+          <div className="detail-card spec-card">
+            <div className="detail-head">
+              <h2>Čo je to za minca</h2>
+            </div>
+            <div className="detail-row">
+              <span className="detail-label">Emisia</span>
+              <span className="detail-value">{spec.spec.name}</span>
+            </div>
+            {years && (
+              <div className="detail-row">
+                <span className="detail-label">Roky razby</span>
+                <span className="detail-value">{years}</span>
+              </div>
+            )}
+            <div className="detail-row">
+              <span className="detail-label">Materiál (katalóg)</span>
+              <span className="detail-value">{spec.spec.material}</span>
+            </div>
+            <div className="detail-row">
+              <span className="detail-label">Hmotnosť (katalóg)</span>
+              <span className="detail-value">{spec.spec.weightGrams} g</span>
+            </div>
+            {spec.spec.diameterMm && (
+              <div className="detail-row">
+                <span className="detail-label">Priemer</span>
+                <span className="detail-value">{spec.spec.diameterMm} mm</span>
+              </div>
+            )}
+            {spec.score < 4 && (
+              <p className="muted" style={{ margin: "8px 0 0" }}>
+                ⚠️ Zhoda s katalógom je čiastočná – over rok a nominál.
+              </p>
+            )}
+          </div>
+        );
+      })()}
 
       <CoinValuation coin={coin} settings={settings} suggestedErrorIds={suggestedErrorIds} />
 

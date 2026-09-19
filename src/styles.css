@@ -725,6 +725,11 @@ button {
   transform: scale(1.02);
 }
 
+/* karta "Čo je to za minca" */
+.spec-card .detail-row .detail-label {
+  color: var(--text-dim);
+}
+
 /* status hláška pod kruhom */
 .camera-status {
   position: absolute;

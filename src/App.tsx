@@ -89,7 +89,7 @@ export default function App() {
         auto = null;
       }
 
-      // Materiál z rubu – len rýchla farba kovu (bez pomalého OCR)
+      // Rub: farba kovu vždy; údaje z rubu OCR-ujeme, keď líc nevysvetlil všetko
       try {
         const revMetal = await extractMetalFromPhoto(result.reverse);
         if (auto && auto.materialSuggestion === "" && revMetal?.materialSuggestion) {
@@ -97,6 +97,35 @@ export default function App() {
         }
       } catch {
         // rub nie je kritický
+      }
+      const missing =
+        !auto || !auto.parsed.year || !auto.parsed.country || !auto.parsed.denomination;
+      if (missing) {
+        try {
+          const revAuto = await recognizeCoinPhoto(result.reverse, () => undefined);
+          if (auto) {
+            if (!auto.parsed.year && revAuto.parsed.year) {
+              auto.parsed.year = revAuto.parsed.year;
+              auto.parsed.confidence = Math.min(1, auto.parsed.confidence + 0.2);
+            }
+            if (!auto.parsed.country && revAuto.parsed.country) {
+              auto.parsed.country = revAuto.parsed.country;
+              if (revAuto.parsed.currency) auto.parsed.currency = revAuto.parsed.currency;
+              auto.parsed.confidence = Math.min(1, auto.parsed.confidence + 0.2);
+            }
+            if (!auto.parsed.denomination && revAuto.parsed.denomination) {
+              auto.parsed.denomination = revAuto.parsed.denomination;
+              if (revAuto.parsed.currency) auto.parsed.currency = revAuto.parsed.currency;
+              auto.parsed.confidence = Math.min(1, auto.parsed.confidence + 0.2);
+            }
+            auto.rawText = (auto.rawText + "\n" + revAuto.rawText).trim();
+            if (auto.materialSuggestion === "" && revAuto.materialSuggestion) {
+              auto.materialSuggestion = revAuto.materialSuggestion;
+            }
+          }
+        } catch {
+          // rub nie je kritický
+        }
       }
 
       const autoFilled: string[] = [];
@@ -378,7 +407,7 @@ export default function App() {
           <section className="card">
             <h3 className="section-title">O aplikácii</h3>
             <p className="muted">
-              CoinScanner • verzia 0.3.1 • funguje offline, bez servera a bez platených API.
+              CoinScanner • verzia 0.3.2 • funguje offline, bez servera a bez platených API.
               Po odfotení lica automaticky prečíta nápis (lokálne OCR) a predvyplní rok,
               krajinu, nominál a menu; z farby kovu odhadne materiál. Analýza fotografie
               tiež vyhodnocuje osvetlenie, vycentrovanie a naznačuje možnú chyborazbu.

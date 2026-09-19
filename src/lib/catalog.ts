@@ -92,7 +92,7 @@ export interface SpecMatch {
   score: number;
 }
 
-function denomScore(nDenom: string, specDenom: string, specName: string): number {
+export function denomScore(nDenom: string, specDenom: string, specName: string): number {
   if (!nDenom) return 0;
   const targets = [normalize(specDenom), normalize(specName)];
   let best = 0;

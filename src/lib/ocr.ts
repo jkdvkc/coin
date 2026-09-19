@@ -328,6 +328,86 @@ export function invertCanvas(src: HTMLCanvasElement): HTMLCanvasElement {
   return out;
 }
 
+/** Zmenší canvas na daný násobok (Tesseract LSTM je trénovaný na text ~30–40 px;
+ *  veľké osamelé číslice na minci (~80 px+) preskočí – preto pokus v menšom merítku). */
+export function scaleCanvas(src: HTMLCanvasElement, factor: number): HTMLCanvasElement {
+  const out = document.createElement("canvas");
+  out.width = Math.max(16, Math.round(src.width * factor));
+  out.height = Math.max(16, Math.round(src.height * factor));
+  const ctx = out.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return src;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(src, 0, 0, out.width, out.height);
+  return out;
+}
+
+/** Vystrihne stredovú časť canvasu (veľká číslica nominálu v strede mince). */
+export function cropCenter(src: HTMLCanvasElement, frac: number): HTMLCanvasElement {
+  const w = Math.round(src.width * frac);
+  const h = Math.round(src.height * frac);
+  const x0 = Math.round((src.width - w) / 2);
+  const y0 = Math.round((src.height - h) / 2);
+  const out = document.createElement("canvas");
+  out.width = w;
+  out.height = h;
+  const ctx = out.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return src;
+  ctx.drawImage(src, x0, y0, w, h, 0, 0, w, h);
+  return out;
+}
+
+/**
+ * Otsu binarizácia – automaticky nájde prah medzi nápisom a povrchom mince.
+ * Na reálnych fotkách (odlesky, tiene, špinavý povrch) často zachráni čítanie,
+ * keď obyčajný grayscale kontrast nestačí.
+ */
+export function otsuBinarize(src: HTMLCanvasElement): HTMLCanvasElement {
+  const out = document.createElement("canvas");
+  out.width = src.width;
+  out.height = src.height;
+  const ctx = out.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return src;
+  ctx.drawImage(src, 0, 0);
+  const img = ctx.getImageData(0, 0, out.width, out.height);
+  const d = img.data;
+  const n = d.length / 4;
+  const hist = new Uint32Array(256);
+  const gray = new Uint8Array(n);
+  for (let i = 0; i < n; i++) {
+    const g = (0.299 * d[i * 4] + 0.587 * d[i * 4 + 1] + 0.114 * d[i * 4 + 2]) | 0;
+    gray[i] = g;
+    hist[g]++;
+  }
+  // Otsu: maximalizácia medzitriednej variancie
+  let sum = 0;
+  for (let v = 0; v < 256; v++) sum += v * hist[v];
+  let sumB = 0, wB = 0, best = 0, thr = 128;
+  for (let v = 0; v < 256; v++) {
+    wB += hist[v];
+    if (wB === 0) continue;
+    const wF = n - wB;
+    if (wF === 0) break;
+    sumB += v * hist[v];
+    const mB = sumB / wB;
+    const mF = (sum - sumB) / wF;
+    const between = wB * wF * (mB - mF) * (mB - mF);
+    if (between > best) {
+      best = between;
+      thr = v;
+    }
+  }
+  for (let i = 0; i < n; i++) {
+    const v = gray[i] > thr ? 255 : 0;
+    const j = i * 4;
+    d[j] = v;
+    d[j + 1] = v;
+    d[j + 2] = v;
+    d[j + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  return out;
+}
+
 /**
  * Rozvinie kruhový prstenec mince do rovného pásu (polar unwrap).
  * Zakrivený nápis (SLOVENSKO, MAGYARORSZÁG…) sa tak premení na normálny
@@ -451,10 +531,41 @@ export async function recognizeCoinPhoto(
     // Mince = riedky text na kruhu: default PSM 3 (celostránkový) na nich zlyháva.
     // Pokusy: celá minca (sparse, normálny aj invert), potom ROZVINUTÉ PÁSY
     // okolo okraja – tam je zakrivený nápis krajiny (SLOVENSKO, MAGYARORSZÁG…).
-    const attempts: Array<{ canvas: HTMLCanvasElement; psm: string }> = [
+    const attempts: Array<{ canvas: HTMLCanvasElement; psm: string; whitelist?: string }> = [
       { canvas: pre, psm: "11" },
-      { canvas: preInv, psm: "11" }
+      { canvas: preInv, psm: "11" },
+      // PSM 6 (blok textu) chytá veľké osamelé číslice v strede mince,
+      // ktoré sparse režim (11) preskočí – napr. veľká „5" na 5 korunách.
+      { canvas: pre, psm: "6" },
+      { canvas: preInv, psm: "6" }
     ];
+    // Otsu binarizácia – pomôže pri reálnych fotkách s odleskami/tieňmi
+    try {
+      attempts.push({ canvas: otsuBinarize(pre), psm: "11" });
+      attempts.push({ canvas: otsuBinarize(pre), psm: "6" });
+    } catch {
+      // binarizácia nie je kritická
+    }
+    // Zmenšeninové pokusy – veľké číslice v strede mince ("5", "10", "2 €")
+    // sú pre LSTM príliš veľké; v polovičnom merítku ich prečíta.
+    try {
+      const half = scaleCanvas(pre, 0.5);
+      attempts.push({ canvas: half, psm: "11" });
+      attempts.push({ canvas: half, psm: "6" });
+    } catch {
+      // scale nie je kritický
+    }
+    // CIEĽOVÝ POKUS: stred mince + whitelist číslic a € – číta veľký nominál
+    // ("5", "2 €", "10"), ktorý celoplošné režimy ignorujú.
+    let centerText = "";
+    try {
+      const c1 = scaleCanvas(cropCenter(pre, 0.5), 0.55); // ~165 px
+      const c2 = scaleCanvas(cropCenter(pre, 0.65), 0.42); // ~164 px
+      attempts.push({ canvas: c1, psm: "7", whitelist: "0123456789€ " });
+      attempts.push({ canvas: c2, psm: "7", whitelist: "0123456789€ " });
+    } catch {
+      // center crop nie je kritický
+    }
     // Pásy okolo okraja – zakrivený nápis krajiny.
     // Horný oblúk (ccw=false): písmená majú hroty VON (k okraju) → vonkajší polomer
     // musí byť hore pásu (innerFirst=false), inak je text hore-nohami.
@@ -479,10 +590,18 @@ export async function recognizeCoinPhoto(
     let combined = "";
     for (const a of attempts) {
       try {
-        await worker.setParameters({ tessedit_pageseg_mode: a.psm });
+        await worker.setParameters({
+          tessedit_pageseg_mode: a.psm,
+          tessedit_char_whitelist: a.whitelist ?? ""
+        });
         const run = await worker.recognize(a.canvas);
         const text = run.data.text ?? "";
         combined += "\n" + text;
+        // whitelistový stredový pokus – ulož si číslicu nominálu
+        if (a.whitelist) {
+          const digits = text.replace(/[^0-9€]/g, "").trim();
+          if (digits && !centerText) centerText = digits;
+        }
         const s = scoreText(text);
         if (s > score) score = s;
         if (score >= 6 && strips.length === 0) break; // bez pásov stačí dobrý výsledok z celku
@@ -494,6 +613,19 @@ export async function recognizeCoinPhoto(
     onProgress?.({ stage: "done", progress: 1 });
     // Parse cez SPOJENÝ text (všetky pokusy) – nájde aj roztrieštené časti.
     const parsed = parseCoinText(combined);
+    // Doplnenie nominálu zo stredovej číslice: OCR bežne prečíta jednotku
+    // (KORUN/EURO CENT) a krajinu, ale veľkú číslicu preskočí.
+    if (!parsed.denomination && centerText) {
+      const n = centerText.replace(/[^0-9]/g, "");
+      if (n && Number(n) > 0 && Number(n) <= 999) {
+        if (/CENT/.test(combined)) parsed.denomination = `${n} centov`;
+        else if (/K[O0]RUN|KC?[S5]/.test(combined)) parsed.denomination = `${n} korún`;
+        else if (/EUR|€/.test(combined)) parsed.denomination = `${n} eur`;
+        if (parsed.denomination && !parsed.currency) {
+          if (parsed.denomination.includes("cent")) parsed.currency = "EUR";
+        }
+      }
+    }
     const hints: string[] = [];
     if (!parsed.year) hints.push("Rok sa z fotky nepodarilo prečítať – skús lepšie osvetlenie alebo fot z rovna.");
     if (!parsed.country) hints.push("Krajinu sa nepodarilo spoznať z nápisu.");
