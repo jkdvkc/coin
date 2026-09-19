@@ -97,16 +97,16 @@ export function findYear(text: string): string {
   return best;
 }
 
-/** Jednotky – tolerantné na OCR (K0RUN, KORUNY, KC5…). */
+/** Jednotky – tolerantné na OCR (K0RUN, KORUNY, KC5…, symbol €). */
 const UNIT_RE =
-  /(EURO?CENT|EURO?\s*CENT[YUIA]?|CENT[YUIA]?|EURA?|K[O0]RUN[YSYZ]*|KC?[S5][SZ5]?|HAL[EI]R[OUYZ]*|F[O0]RINT[OUYZ]*|ZL[O0]TY[CH]*|SCHILLING[EP]?)/;
+  /(€|EURO?CENT|EURO?\s*CENT[YUIA]?|CENT[YUIA]?|EURA?|K[O0]RUN[YSYZ]*|KC?[S5][SZ5]?|HAL[EI]R[OUYZ]*|F[O0]RINT[OUYZ]*|ZL[O0]TY[CH]*|SCHILLING[EP]?)/;
 
 /** Nájde nominál – číslo + mena alebo slovné číslovky. */
 export function findDenomination(text: string): { denomination: string; currency: string } {
   const t = deaccent(text).toUpperCase();
   const tn = digitsNorm(text).toUpperCase();
 
-  // "2 EURA", "1 EURO CENT", "50 CENTOV", "10 KORUN", "10 K0RUN"…
+  // "2 EURA", "1 EURO CENT", "50 CENTOV", "10 KORUN", "10 K0RUN", "2 €"…
   // (hľadáme na normalizovanej aj pôvodnej variante, podľa toho, čo dá zmysel)
   for (const src of [t, tn]) {
     const numeric = src.match(new RegExp(`(\\d{1,3})\\s*${UNIT_RE.source}`));
@@ -116,7 +116,7 @@ export function findDenomination(text: string): { denomination: string; currency
     const unit = numeric[2].replace(/\s+/g, " ").trim();
     let currency = "";
     if (/CENT/.test(unit)) currency = "EUR";
-    else if (/^EUR/.test(unit)) currency = "EUR";
+    else if (/^EUR|^€/.test(unit)) currency = "EUR";
     else if (/HAL/.test(unit)) currency = "hal.";
     else if (/FORINT/.test(unit)) currency = "HUF";
     else if (/ZLOTY/.test(unit)) currency = "PLN";
@@ -126,9 +126,11 @@ export function findDenomination(text: string): { denomination: string; currency
       ? `${value} centov`
       : /K[O0]RUN|KORUN/.test(unit)
         ? `${value} korún`
-        : /^KC?[S5]/.test(unit)
-          ? `${value} Kčs`
-          : `${value} ${unit.toLowerCase()}`;
+        : /^€|^EUR/.test(unit)
+          ? `${value} eur`
+          : /^KC?[S5]/.test(unit)
+            ? `${value} Kčs`
+            : `${value} ${unit.toLowerCase()}`;
     return { denomination: label, currency };
   }
 

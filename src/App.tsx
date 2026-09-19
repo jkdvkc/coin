@@ -378,7 +378,7 @@ export default function App() {
           <section className="card">
             <h3 className="section-title">O aplikácii</h3>
             <p className="muted">
-              CoinScanner • verzia 0.3.0 • funguje offline, bez servera a bez platených API.
+              CoinScanner • verzia 0.3.1 • funguje offline, bez servera a bez platených API.
               Po odfotení lica automaticky prečíta nápis (lokálne OCR) a predvyplní rok,
               krajinu, nominál a menu; z farby kovu odhadne materiál. Analýza fotografie
               tiež vyhodnocuje osvetlenie, vycentrovanie a naznačuje možnú chyborazbu.

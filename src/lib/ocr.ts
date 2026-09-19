@@ -81,6 +81,10 @@ function getWorker(): Promise<TesseractWorker> {
       });
       return worker;
     })();
+    // Ak sa tvorba workera nepodarí, resetuj – ďalšie volanie skúsi znova.
+    workerPromise.catch(() => {
+      workerPromise = null;
+    });
   }
   return workerPromise;
 }
@@ -324,6 +328,73 @@ export function invertCanvas(src: HTMLCanvasElement): HTMLCanvasElement {
   return out;
 }
 
+/**
+ * Rozvinie kruhový prstenec mince do rovného pásu (polar unwrap).
+ * Zakrivený nápis (SLOVENSKO, MAGYARORSZÁG…) sa tak premení na normálny
+ * riadok, ktorý Tesseract dokáže prečítať.
+ *
+ * ccw=false → pás začína na ľavom hornom kvadrante, číta horný oblúk.
+ * ccw=true  → číta spodný oblúk (obrátený smer).
+ * innerFirst=true → prvý riadok výsledku je vnútorný polomer.
+ */
+export function unwrapRing(
+  src: HTMLCanvasElement,
+  r0frac: number,
+  r1frac: number,
+  ccw: boolean,
+  innerFirst: boolean,
+  offsetRad: number
+): HTMLCanvasElement {
+  const side = src.width;
+  const cx = side / 2;
+  const cy = side / 2;
+  const r0 = r0frac * (side / 2);
+  const r1 = r1frac * (side / 2);
+  const rMid = (r0 + r1) / 2;
+  const W = Math.max(400, Math.min(2400, Math.round(2 * Math.PI * rMid)));
+  const H = Math.max(56, Math.round(r1 - r0));
+  const out = document.createElement("canvas");
+  out.width = W;
+  out.height = H;
+  const sctx = src.getContext("2d", { willReadFrequently: true });
+  const octx = out.getContext("2d", { willReadFrequently: true });
+  if (!sctx || !octx) return out;
+  const sd = sctx.getImageData(0, 0, side, side).data;
+  const oimg = octx.createImageData(W, H);
+  const od = oimg.data;
+
+  const sample = (x: number, y: number, o: [number, number, number, number]) => {
+    const x0 = Math.max(0, Math.min(side - 2, Math.floor(x)));
+    const y0 = Math.max(0, Math.min(side - 2, Math.floor(y)));
+    const fx = Math.max(0, Math.min(1, x - x0));
+    const fy = Math.max(0, Math.min(1, y - y0));
+    for (let k = 0; k < 4; k++) {
+      const p00 = sd[(y0 * side + x0) * 4 + k];
+      const p10 = sd[(y0 * side + x0 + 1) * 4 + k];
+      const p01 = sd[((y0 + 1) * side + x0) * 4 + k];
+      const p11 = sd[((y0 + 1) * side + x0 + 1) * 4 + k];
+      o[k] = p00 * (1 - fx) * (1 - fy) + p10 * fx * (1 - fy) + p01 * (1 - fx) * fy + p11 * fx * fy;
+    }
+  };
+  const px: [number, number, number, number] = [0, 0, 0, 255];
+
+  for (let y = 0; y < H; y++) {
+    const t = H === 1 ? 0 : y / (H - 1);
+    const r = innerFirst ? r0 + t * (r1 - r0) : r1 - t * (r1 - r0);
+    for (let x = 0; x < W; x++) {
+      const th = ccw ? offsetRad - (x / W) * 2 * Math.PI : offsetRad + (x / W) * 2 * Math.PI;
+      sample(cx + r * Math.cos(th), cy + r * Math.sin(th), px);
+      const i = (y * W + x) * 4;
+      od[i] = px[0];
+      od[i + 1] = px[1];
+      od[i + 2] = px[2];
+      od[i + 3] = 255;
+    }
+  }
+  octx.putImageData(oimg, 0, 0);
+  return out;
+}
+
 const METAL_LABELS: Record<MetalClass, string> = {
   copper: "Meď / pozinkovaná oceľ s medeným povrchom",
   gold: "Mosadz / Nordic gold / niklová mosadz",
@@ -378,32 +449,51 @@ export async function recognizeCoinPhoto(
     void scoreText;
 
     // Mince = riedky text na kruhu: default PSM 3 (celostránkový) na nich zlyháva.
-    // Skúšame sparse text (11) na normalnom aj invertovanom obraze, potom blok (6).
+    // Pokusy: celá minca (sparse, normálny aj invert), potom ROZVINUTÉ PÁSY
+    // okolo okraja – tam je zakrivený nápis krajiny (SLOVENSKO, MAGYARORSZÁG…).
     const attempts: Array<{ canvas: HTMLCanvasElement; psm: string }> = [
       { canvas: pre, psm: "11" },
-      { canvas: preInv, psm: "11" },
-      { canvas: pre, psm: "6" }
+      { canvas: preInv, psm: "11" }
     ];
-    let rawText = "";
+    // Pásy okolo okraja – zakrivený nápis krajiny.
+    // Horný oblúk (ccw=false): písmená majú hroty VON (k okraju) → vonkajší polomer
+    // musí byť hore pásu (innerFirst=false), inak je text hore-nohami.
+    // Spodný oblúk (ccw=true): hroty smerujú DO stredu → vnútorný polomer hore (innerFirst=true).
+    const strips: HTMLCanvasElement[] = [];
+    try {
+      strips.push(unwrapRing(crop, 0.68, 0.92, false, false, -Math.PI * 0.9));
+      strips.push(unwrapRing(crop, 0.68, 0.92, false, false, -Math.PI * 0.4));
+      strips.push(unwrapRing(crop, 0.68, 0.92, true, true, Math.PI * 0.9));
+      strips.push(unwrapRing(crop, 0.68, 0.92, true, true, Math.PI * 0.4));
+    } catch {
+      // unwrap nie je kritický
+    }
+    for (const st of strips) {
+      attempts.push({ canvas: st, psm: "7" });
+      attempts.push({ canvas: invertCanvas(st), psm: "7" });
+    }
+
+    // Spojený text VŠETKÝCH úspešných pokusov – parser hľadá v každom kuse,
+    // aj keď jeden pokus nenašiel nič (krajina v jednom, rok v druhom).
     let score = -1;
+    let combined = "";
     for (const a of attempts) {
       try {
         await worker.setParameters({ tessedit_pageseg_mode: a.psm });
         const run = await worker.recognize(a.canvas);
         const text = run.data.text ?? "";
+        combined += "\n" + text;
         const s = scoreText(text);
-        if (s > score) {
-          rawText = text;
-          score = s;
-        }
-        if (score >= 4) break; // dosť dobrý výsledok – ďalšie pokusy netreba
+        if (s > score) score = s;
+        if (score >= 6 && strips.length === 0) break; // bez pásov stačí dobrý výsledok z celku
       } catch {
         // pokus zlyhal – skúsime ďalší
       }
     }
 
     onProgress?.({ stage: "done", progress: 1 });
-    const parsed = parseCoinText(rawText);
+    // Parse cez SPOJENÝ text (všetky pokusy) – nájde aj roztrieštené časti.
+    const parsed = parseCoinText(combined);
     const hints: string[] = [];
     if (!parsed.year) hints.push("Rok sa z fotky nepodarilo prečítať – skús lepšie osvetlenie alebo fot z rovna.");
     if (!parsed.country) hints.push("Krajinu sa nepodarilo spoznať z nápisu.");
@@ -416,7 +506,7 @@ export async function recognizeCoinPhoto(
       materialSuggestion: METAL_MATERIAL[metalFinal],
       weightSuggestion: "",
       hints,
-      rawText: rawText.trim(),
+      rawText: combined.trim(),
       confidence: parsed.confidence
     };
   } finally {

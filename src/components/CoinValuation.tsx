@@ -38,7 +38,7 @@ export default function CoinValuation({ coin, settings, suggestedErrorIds = [] }
     year: coin.year,
     material: coin.material,
     weightGrams: coin.weightGrams,
-    errorIds,
+    errorIds: [], // hlavička = bežná cena BEZ chyby (chyby sa násobia len v rozkliku)
     settings
   });
 
